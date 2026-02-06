@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@theme {
+  --color-background: 210 20% 97%;
+  --color-foreground: 215 25% 15%;
+  --color-card: 0 0% 100%;
+  --color-card-foreground: 215 25% 15%;
+  --color-popover: 0 0% 100%;
+  --color-popover-foreground: 215 25% 15%;
+  --color-primary: 217 91% 55%;
+  --color-primary-foreground: 0 0% 100%;
+  --color-secondary: 214 32% 91%;
+  --color-secondary-foreground: 215 25% 15%;
+  --color-muted: 210 20% 94%;
+  --color-muted-foreground: 215 16% 47%;
+  --color-accent: 217 91% 55%;
+  --color-accent-foreground: 0 0% 100%;
+  --color-destructive: 0 72% 51%;
+  --color-destructive-foreground: 0 0% 98%;
+  --color-border: 214 32% 91%;
+  --color-input: 214 32% 91%;
+  --color-ring: 217 91% 55%;
+  --color-chart-1: 217 91% 55%;
+  --color-chart-2: 262 83% 58%;
+  --color-chart-3: 160 84% 39%;
+  --color-chart-4: 43 96% 56%;
+  --color-chart-5: 339 90% 51%;
+
+  --radius: 0.625rem;
+}
+
+@layer base {
+  :root {
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 215 25% 15%;
+    --sidebar-primary: 217 91% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 214 95% 93%;
+    --sidebar-accent-foreground: 217 91% 55%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 217 91% 55%;
+    --canvas-bg: 210 29% 97%;
+    --canvas-grid: 214 32% 91%;
+    --canvas-text: 215 25% 15%;
+    --minimap-bg: 215 25% 15%;
+    --minimap-element: 215 16% 64%;
+  }
+
+  .dark {
+    --color-background: 222 47% 8%;
+    --color-foreground: 210 40% 93%;
+    --color-card: 222 47% 11%;
+    --color-card-foreground: 210 40% 93%;
+    --color-popover: 222 47% 11%;
+    --color-popover-foreground: 210 40% 93%;
+    --color-primary: 217 91% 55%;
+    --color-primary-foreground: 0 0% 100%;
+    --color-secondary: 217 33% 17%;
+    --color-secondary-foreground: 210 40% 93%;
+    --color-muted: 217 33% 17%;
+    --color-muted-foreground: 215 20% 55%;
+    --color-accent: 217 91% 55%;
+    --color-accent-foreground: 0 0% 100%;
+    --color-destructive: 0 72% 51%;
+    --color-destructive-foreground: 0 0% 98%;
+    --color-border: 217 33% 20%;
+    --color-input: 217 33% 20%;
+    --color-ring: 217 91% 55%;
+    --color-chart-1: 217 91% 55%;
+    --color-chart-2: 262 83% 58%;
+    --color-chart-3: 160 84% 39%;
+    --color-chart-4: 43 96% 56%;
+    --color-chart-5: 339 90% 51%;
+
+    --sidebar-background: 222 47% 10%;
+    --sidebar-foreground: 210 40% 90%;
+    --sidebar-primary: 217 91% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 33% 17%;
+    --sidebar-accent-foreground: 217 91% 55%;
+    --sidebar-border: 217 33% 20%;
+    --sidebar-ring: 217 91% 55%;
+    --canvas-bg: 222 47% 10%;
+    --canvas-grid: 217 33% 18%;
+    --canvas-text: 210 40% 93%;
+    --minimap-bg: 222 47% 6%;
+    --minimap-element: 215 20% 50%;
+  }
+
+  * {
+    border-color: hsl(var(--color-border));
+  }
+
+  body {
+    background-color: hsl(var(--color-background));
+    color: hsl(var(--color-foreground));
+  }
+}
+
+/* Prevent text selection while drawing */
+canvas {
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
