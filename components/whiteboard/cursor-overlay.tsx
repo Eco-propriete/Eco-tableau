@@ -97,7 +97,7 @@ export function UserAvatars({ users, userName, userColor }: UserAvatarsProps) {
             key={user.id}
             className="flex items-center justify-center w-7 h-7 rounded-full text-xs font-medium ring-2 ring-card"
             style={{ backgroundColor: user.color, color: "white" }}
-            title={user.id === "self" ? `${user.name} (You)` : user.name}
+            title={user.id === "self" ? `${user.name}` : user.name}
           >
             {user.name.charAt(0).toUpperCase()}
           </div>

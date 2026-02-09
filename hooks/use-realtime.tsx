@@ -16,7 +16,7 @@ const CURSOR_COLORS = [
   "#0891B2",
 ];
 
-const ANIMAL_NAMES = ["Vous", "Invité"];
+const ANIMAL_NAMES = ["User 1", "User 2", "User 3", "User 4"];
 
 function getRandomName() {
   return ANIMAL_NAMES[Math.floor(Math.random() * ANIMAL_NAMES.length)];

@@ -72,7 +72,7 @@ export function TopBar({
     for (const el of state.elements) {
       ctx.save();
       ctx.globalAlpha = el.opacity;
-      switch (el.type) {
+      switch (el.element_type) {
         case "rectangle":
           if (el.fill !== "transparent") {
             ctx.fillStyle = el.fill;
@@ -340,7 +340,7 @@ export function TopBar({
             </TooltipContent>
           </Tooltip>
 
-          <Tooltip>
+          {/*<Tooltip>
             <TooltipTrigger asChild>
               <button
                 onClick={handleClearAll}
@@ -350,10 +350,11 @@ export function TopBar({
                 <Trash2 className="w-4 h-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
+
+           <TooltipContent side="bottom" className="text-xs">
               Supprimer tout
             </TooltipContent>
-          </Tooltip>
+          </Tooltip>*/}
         </div>
       </div>
 

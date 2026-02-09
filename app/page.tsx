@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter, redirect } from "next/navigation";
 import { WhiteboardProvider, useWhiteboard } from "@/hooks/use-whiteboard";
 import { useTheme } from "@/hooks/use-theme";
 import {
@@ -23,11 +23,11 @@ function generateRoomId() {
   return Math.random().toString(36).substring(2, 10);
 }
 
-function WhiteboardApp() {
+export function WhiteboardApp({ params }: { params: { id: string } }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [roomId, setRoomId] = useState<string | null>(searchParams.get("room"));
-
+  const [boardId] = useState(params.id);
   const {
     remoteCursors,
     remoteUsers,
@@ -38,6 +38,8 @@ function WhiteboardApp() {
     userName,
     userColor,
   } = useRealtime(roomId);
+
+  console.log("Board ID:", boardId);
 
   const handleCreateRoom = useCallback(() => {
     const newRoomId = generateRoomId();
@@ -76,7 +78,11 @@ function WhiteboardApp() {
         <Toolbar />
         <StylePanel />
         <div className="relative w-full h-full">
-          <Canvas broadcastCursor={broadcastCursor} roomId={roomId} />
+          <Canvas
+            broadcastCursor={broadcastCursor}
+            roomId={roomId}
+            params={params}
+          />
           <CursorOverlayWrapper remoteCursors={remoteCursors} />
         </div>
         <Minimap />
@@ -162,9 +168,5 @@ function WhiteboardSync({
 }
 
 export default function Home() {
-  return (
-    <Suspense>
-      <WhiteboardApp />
-    </Suspense>
-  );
+  redirect("/dashboard");
 }

@@ -9,6 +9,8 @@ import type {
 } from "@/lib/whiteboard-types";
 import { STICKY_COLORS } from "@/lib/whiteboard-types";
 import { resolveThemeColor, useTheme } from "@/hooks/use-theme";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 function generateId() {
   return Math.random().toString(36).substring(2, 15);
@@ -43,7 +45,7 @@ function measureTextBounds(el: WhiteboardElement) {
 }
 
 function getElementBounds(el: WhiteboardElement) {
-  if (el.type === "pen" && el.points && el.points.length > 0) {
+  if (el.element_type === "pen" && el.points && el.points.length > 0) {
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
@@ -56,14 +58,14 @@ function getElementBounds(el: WhiteboardElement) {
     }
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }
-  if (el.type === "arrow") {
+  if (el.element_type === "arrow") {
     const minX = Math.min(el.x, el.endX ?? el.x);
     const minY = Math.min(el.y, el.endY ?? el.y);
     const maxX = Math.max(el.x, el.endX ?? el.x);
     const maxY = Math.max(el.y, el.endY ?? el.y);
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }
-  if (el.type === "text") {
+  if (el.element_type === "text") {
     return measureTextBounds(el);
   }
   return { x: el.x, y: el.y, width: el.width, height: el.height };
@@ -92,7 +94,7 @@ function isPointInElement(
   el: WhiteboardElement,
 ): boolean {
   // Pen: check distance to each line segment of the path
-  if (el.type === "pen" && el.points && el.points.length > 1) {
+  if (el.element_type === "pen" && el.points && el.points.length > 1) {
     const hitDist = Math.max(el.strokeWidth * 2, 12);
     for (let i = 1; i < el.points.length; i++) {
       const p0 = el.points[i - 1];
@@ -103,7 +105,7 @@ function isPointInElement(
   }
 
   // Arrow: check distance to the line
-  if (el.type === "arrow") {
+  if (el.element_type === "arrow") {
     const ex = el.endX ?? el.x;
     const ey = el.endY ?? el.y;
     const hitDist = Math.max(el.strokeWidth * 2, 12);
@@ -111,7 +113,7 @@ function isPointInElement(
   }
 
   // Text: use measured bounds
-  if (el.type === "text") {
+  if (el.element_type === "text") {
     const bounds = getElementBounds(el);
     const padding = 6;
     return (
@@ -198,9 +200,10 @@ interface ResizeState {
 interface CanvasProps {
   broadcastCursor?: (x: number, y: number) => void;
   roomId?: string | null;
+  params: { id: string };
 }
 
-export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
+export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
@@ -214,7 +217,17 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
     pushHistory,
     screenToCanvas,
   } = useWhiteboard();
-
+  const router = useRouter();
+  const [boardId] = useState(params.id);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [unsavedElementIds, setUnsavedElementIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [deletedElementIds, setDeletedElementIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [isDragging, setIsDragging] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [dragStart, setDragStart] = useState<Point | null>(null);
@@ -238,6 +251,213 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
   const [moveElementStartArrow, setMoveElementStartArrow] = useState<
     Map<string, { endX: number; endY: number }>
   >(new Map());
+
+  // Load elements from Supabase on mount
+  useEffect(() => {
+    async function loadBoard() {
+      if (!boardId || boardId === "undefined") {
+        console.error("Invalid boardId:", boardId);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        const supabase = createClient();
+
+        console.log("Loading elements for board:", boardId);
+
+        const { data: elementData, error } = await supabase
+          .from("canvas_elements")
+          .select("*")
+          .eq("board_id", boardId)
+          .order("z_index", { ascending: true });
+
+        if (error) {
+          console.error("Error loading elements:", error);
+          setIsLoading(false);
+          return;
+        }
+
+        console.log("Raw data from Supabase:", elementData);
+
+        if (elementData && elementData.length > 0) {
+          // Convert database elements to WhiteboardElements
+          const whiteboardElements: WhiteboardElement[] = elementData.map(
+            (elem: any) => {
+              let content;
+              try {
+                content = elem.content ? JSON.parse(elem.content) : {};
+              } catch (e) {
+                console.error("Error parsing content for element:", elem.id, e);
+                content = {};
+              }
+
+              return {
+                id: elem.id,
+                element_type: elem.element_type,
+                x: elem.x,
+                y: elem.y,
+                width: elem.width,
+                height: elem.height,
+                fill: elem.fill_color || "transparent",
+                stroke: elem.color,
+                strokeWidth: elem.stroke_width,
+                opacity: content.opacity ?? 1,
+                text: content.text,
+                fontSize: content.fontSize,
+                points: content.points,
+                endX: content.endX,
+                endY: content.endY,
+              };
+            },
+          );
+
+          console.log(
+            "✅ Loaded elements from Supabase:",
+            whiteboardElements.length,
+            "elements",
+          );
+          console.log("Elements:", whiteboardElements);
+
+          // Clear any existing elements first, then set new ones
+          dispatch({ type: "SET_ELEMENTS", elements: whiteboardElements });
+        } else {
+          console.log("ℹ️ No elements found for board:", boardId);
+          dispatch({ type: "SET_ELEMENTS", elements: [] });
+        }
+      } catch (err) {
+        console.error("Error in loadBoard:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadBoard();
+  }, [boardId, dispatch]);
+
+  // Debug: Log when state.elements changes
+  useEffect(() => {
+    console.log(
+      "📊 State updated - Current elements count:",
+      state.elements.length,
+    );
+    if (state.elements.length > 0) {
+      console.log("📊 Elements in state:", state.elements);
+    }
+  }, [state.elements]);
+
+  // Mark element as modified (not saved yet)
+  const markElementAsUnsaved = useCallback((elementId: string) => {
+    setUnsavedElementIds((prev) => new Set([...prev, elementId]));
+    setHasUnsavedChanges(true);
+  }, []);
+
+  // Mark element for deletion (not deleted yet)
+  const markElementAsDeleted = useCallback((elementIds: string[]) => {
+    setDeletedElementIds((prev) => new Set([...prev, ...elementIds]));
+    setHasUnsavedChanges(true);
+  }, []);
+
+  function generateUUID() {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+      /[xy]/g,
+      function (c) {
+        const r = (Math.random() * 16) | 0;
+        const v = c === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      },
+    );
+  }
+
+  // Save all unsaved changes to Supabase
+  const saveAllChanges = useCallback(async () => {
+    if (!boardId || boardId === "undefined") {
+      console.error("Cannot save: Invalid boardId");
+      return;
+    }
+
+    setIsSaving(true);
+    const supabase = createClient();
+
+    try {
+      // 1. Delete removed elements
+      if (deletedElementIds.size > 0) {
+        const idsToDelete = Array.from(deletedElementIds);
+        console.log("🗑️ Deleting elements:", idsToDelete);
+
+        const { error: deleteError } = await supabase
+          .from("canvas_elements")
+          .delete()
+          .in("id", idsToDelete);
+
+        if (deleteError) {
+          console.error("❌ Error deleting elements:", deleteError);
+        } else {
+          console.log("✅ Elements deleted successfully");
+          setDeletedElementIds(new Set());
+        }
+      }
+
+      // 2. Save/update modified elements
+      if (unsavedElementIds.size > 0) {
+        const elementsToSave = state.elements.filter((el) =>
+          unsavedElementIds.has(el.id),
+        );
+
+        console.log("💾 Saving elements:", elementsToSave.length);
+
+        const canvasElements = elementsToSave.map((element, index) => ({
+          id: generateUUID(),
+          board_id: boardId,
+          element_type: element.element_type,
+          x: element.x,
+          y: element.y,
+          width: element.width,
+          height: element.height,
+          rotation: 0,
+          color: element.stroke,
+          stroke_width: element.strokeWidth,
+          fill_color: element.fill !== "transparent" ? element.fill : null,
+          content: JSON.stringify({
+            text: element.text,
+            fontSize: element.fontSize,
+            points: element.points,
+            endX: element.endX,
+            endY: element.endY,
+            opacity: element.opacity,
+          }),
+          z_index: state.elements.findIndex((el) => el.id === element.id),
+        }));
+
+        const { error: upsertError } = await supabase
+          .from("canvas_elements")
+          .upsert(canvasElements, {
+            onConflict: "id",
+            ignoreDuplicates: false,
+          });
+
+        if (upsertError) {
+          console.error("❌ Error saving elements:", upsertError);
+          throw upsertError;
+        } else {
+          console.log("✅ All elements saved successfully!");
+          setUnsavedElementIds(new Set());
+          setHasUnsavedChanges(false);
+        }
+      }
+
+      // Show success message
+      alert("✅ Modifications sauvegardées avec succès !");
+    } catch (error) {
+      console.error("Error saving changes:", error);
+      alert("❌ Erreur lors de la sauvegarde. Vérifiez la console.");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [boardId, state.elements, unsavedElementIds, deletedElementIds]);
+
+  // Mark element for deletion (not deleted yet)
 
   // Draw everything
   const draw = useCallback(() => {
@@ -304,7 +524,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
     ctx.save();
     ctx.globalAlpha = el.opacity;
 
-    switch (el.type) {
+    switch (el.element_type) {
       case "rectangle":
         if (el.fill !== "transparent") {
           ctx.fillStyle = el.fill;
@@ -542,6 +762,45 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
     return () => resizeObserver.disconnect();
   }, [draw]);
 
+  // Wheel event handler with passive: false
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleWheelEvent = (e: WheelEvent) => {
+      e.preventDefault();
+
+      if (e.ctrlKey || e.metaKey) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const delta = -e.deltaY * 0.001;
+        const newZoom = Math.max(
+          0.1,
+          Math.min(5, state.camera.zoom * (1 + delta)),
+        );
+        const scale = newZoom / state.camera.zoom;
+
+        setCamera({
+          zoom: newZoom,
+          x: mouseX - (mouseX - state.camera.x) * scale,
+          y: mouseY - (mouseY - state.camera.y) * scale,
+        });
+      } else {
+        setCamera({
+          x: state.camera.x - e.deltaX,
+          y: state.camera.y - e.deltaY,
+        });
+      }
+    };
+
+    canvas.addEventListener("wheel", handleWheelEvent, { passive: false });
+
+    return () => {
+      canvas.removeEventListener("wheel", handleWheelEvent);
+    };
+  }, [state.camera, setCamera]);
+
   // Mouse handlers
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -601,7 +860,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
             setMoveElementStart(starts);
 
             // Store original points for pen elements
-            if (el.type === "pen" && el.points) {
+            if (el.element_type === "pen" && el.points) {
               const origPoints = el.points.map((p) => ({ ...p }));
               const dataMap = new Map<string, Point[]>();
               dataMap.set(el.id, origPoints);
@@ -609,7 +868,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
             }
 
             // Store original arrow endpoints for arrow elements
-            if (el.type === "arrow") {
+            if (el.element_type === "arrow") {
               const arrowMap = new Map<
                 string,
                 { endX: number; endY: number }
@@ -634,6 +893,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
           if (isPointInElement(canvasPoint.x, canvasPoint.y, el)) {
             pushHistory();
             dispatch({ type: "DELETE_ELEMENTS", ids: [el.id] });
+            markElementAsDeleted([el.id]);
             return;
           }
         }
@@ -644,7 +904,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
         const id = generateId();
         const newEl: WhiteboardElement = {
           id,
-          type: "text",
+          element_type: "text",
           x: canvasPoint.x,
           y: canvasPoint.y,
           width: 200,
@@ -668,7 +928,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
         const colorIdx = stickyColorIndex % STICKY_COLORS.length;
         const newEl: WhiteboardElement = {
           id,
-          type: "sticky",
+          element_type: "sticky",
           x: canvasPoint.x - 75,
           y: canvasPoint.y - 75,
           width: 150,
@@ -695,7 +955,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
       if (state.tool === "pen") {
         const newEl: WhiteboardElement = {
           id: generateId(),
-          type: "pen",
+          element_type: "pen",
           x: canvasPoint.x,
           y: canvasPoint.y,
           width: 0,
@@ -710,7 +970,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
       } else if (state.tool === "arrow") {
         const newEl: WhiteboardElement = {
           id: generateId(),
-          type: "arrow",
+          element_type: "arrow",
           x: canvasPoint.x,
           y: canvasPoint.y,
           width: 0,
@@ -730,7 +990,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
       ) {
         const newEl: WhiteboardElement = {
           id: generateId(),
-          type: state.tool as "rectangle" | "ellipse" | "diamond",
+          element_type: state.tool as "rectangle" | "ellipse" | "diamond",
           x: canvasPoint.x,
           y: canvasPoint.y,
           width: 0,
@@ -847,7 +1107,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
 
         const el = state.elements.find((e) => e.id === elementId);
         if (el) {
-          if (el.type === "pen" && el.points && el.points.length > 0) {
+          if (el.element_type === "pen" && el.points && el.points.length > 0) {
             // Scale pen points proportionally
             const scaleX =
               startBounds.width > 0 ? newWidth / startBounds.width : 1;
@@ -864,7 +1124,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
               height: newHeight,
               points: newPoints,
             });
-          } else if (el.type === "arrow") {
+          } else if (el.element_type === "arrow") {
             // Scale arrow endpoints proportionally
             const scaleX =
               startBounds.width > 0 ? newWidth / startBounds.width : 1;
@@ -882,7 +1142,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
               width: newWidth,
               height: newHeight,
             });
-          } else if (el.type === "text") {
+          } else if (el.element_type === "text") {
             // Scale font size proportionally based on height change from original
             const originalFontSize = resizeState.startFontSize ?? 16;
             const scaleY =
@@ -898,7 +1158,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
               height: newHeight,
               fontSize: newFontSize,
             });
-          } else if (el.type === "sticky") {
+          } else if (el.element_type === "sticky") {
             // Scale sticky font size proportionally from original
             const originalFontSize = resizeState.startFontSize ?? 14;
             const scale = Math.min(
@@ -949,7 +1209,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
           };
 
           // Pen: translate all points by the same delta
-          if (el.type === "pen" && el.points && el.points.length > 0) {
+          if (el.element_type === "pen" && el.points && el.points.length > 0) {
             const origPoints = moveElementStartData.get(id);
             if (origPoints) {
               updates.points = origPoints.map((p: Point) => ({
@@ -960,7 +1220,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
           }
 
           // Arrow: translate endX/endY by the same delta
-          if (el.type === "arrow") {
+          if (el.element_type === "arrow") {
             const origArrow = moveElementStartArrow.get(id);
             if (origArrow) {
               updates.endX = origArrow.endX + dx;
@@ -975,7 +1235,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
 
       if (!currentElement || !dragStart) return;
 
-      if (currentElement.type === "pen") {
+      if (currentElement.element_type === "pen") {
         setCurrentElement({
           ...currentElement,
           points: [
@@ -983,7 +1243,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
             { x: canvasPoint.x, y: canvasPoint.y },
           ],
         });
-      } else if (currentElement.type === "arrow") {
+      } else if (currentElement.element_type === "arrow") {
         setCurrentElement({
           ...currentElement,
           endX: canvasPoint.x,
@@ -1025,6 +1285,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
 
     if (resizeState) {
       pushHistory();
+      markElementAsUnsaved(resizeState.elementId);
       setResizeState(null);
       setIsDragging(false);
       return;
@@ -1032,6 +1293,8 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
 
     if (state.tool === "select" && isDragging && moveStart) {
       pushHistory();
+      // Mark all moved elements as unsaved
+      state.selectedIds.forEach((id) => markElementAsUnsaved(id));
       setIsDragging(false);
       setMoveStart(null);
       setMoveElementStart(new Map());
@@ -1043,6 +1306,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
     if (currentElement) {
       pushHistory();
       addElement(currentElement);
+      markElementAsUnsaved(currentElement.id);
       setCurrentElement(null);
     }
 
@@ -1053,43 +1317,13 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
     isDragging,
     currentElement,
     state.tool,
+    state.selectedIds,
     moveStart,
     pushHistory,
     addElement,
     resizeState,
+    markElementAsUnsaved,
   ]);
-
-  // Wheel for zoom
-  const handleWheel = useCallback(
-    (e: React.WheelEvent<HTMLCanvasElement>) => {
-      e.preventDefault();
-
-      if (e.ctrlKey || e.metaKey) {
-        const rect = canvasRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        const delta = -e.deltaY * 0.001;
-        const newZoom = Math.max(
-          0.1,
-          Math.min(5, state.camera.zoom * (1 + delta)),
-        );
-        const scale = newZoom / state.camera.zoom;
-
-        setCamera({
-          zoom: newZoom,
-          x: mouseX - (mouseX - state.camera.x) * scale,
-          y: mouseY - (mouseY - state.camera.y) * scale,
-        });
-      } else {
-        setCamera({
-          x: state.camera.x - e.deltaX,
-          y: state.camera.y - e.deltaY,
-        });
-      }
-    },
-    [state.camera, setCamera],
-  );
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1098,8 +1332,11 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
 
       if (e.key === "Delete" || e.key === "Backspace") {
         if (state.selectedIds.length > 0) {
+          e.preventDefault(); // Empêcher le comportement par défaut
+          console.log("🗑️ Marking elements for deletion:", state.selectedIds);
           pushHistory();
           dispatch({ type: "DELETE_ELEMENTS", ids: state.selectedIds });
+          markElementAsDeleted(state.selectedIds);
         }
         return;
       }
@@ -1122,7 +1359,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
               y: el.y + offset,
             };
             // Shift pen points
-            if (clone.type === "pen" && clone.points) {
+            if (clone.element_type === "pen" && clone.points) {
               clone.points = clone.points.map((p: Point) => ({
                 x: p.x + offset,
                 y: p.y + offset,
@@ -1130,7 +1367,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
             }
             // Shift arrow endpoint
             if (
-              clone.type === "arrow" &&
+              clone.element_type === "arrow" &&
               clone.endX != null &&
               clone.endY != null
             ) {
@@ -1138,10 +1375,18 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
               clone.endY += offset;
             }
             dispatch({ type: "ADD_ELEMENT", element: clone });
+            markElementAsUnsaved(clone.id);
             newIds.push(newId);
           }
           dispatch({ type: "SET_SELECTED_IDS", ids: newIds });
         }
+        return;
+      }
+
+      // Save shortcut (Ctrl+S)
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        saveAllChanges();
         return;
       }
 
@@ -1187,6 +1432,9 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
     state.elements,
     pushHistory,
     dispatch,
+    markElementAsDeleted,
+    markElementAsUnsaved,
+    saveAllChanges,
   ]);
 
   // Double click to edit text/sticky
@@ -1201,7 +1449,7 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
       for (let i = state.elements.length - 1; i >= 0; i--) {
         const el = state.elements[i];
         if (
-          (el.type === "text" || el.type === "sticky") &&
+          (el.element_type === "text" || el.element_type === "sticky") &&
           isPointInElement(canvasPoint.x, canvasPoint.y, el)
         ) {
           setTextInputPos({ x: e.clientX, y: e.clientY, id: el.id });
@@ -1217,12 +1465,13 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
     (text: string) => {
       if (textInputPos) {
         updateElement(textInputPos.id, { text });
+        markElementAsUnsaved(textInputPos.id);
         pushHistory();
       }
       setTextInputPos(null);
       dispatch({ type: "SET_EDITING_TEXT_ID", id: null });
     },
-    [textInputPos, updateElement, pushHistory, dispatch],
+    [textInputPos, updateElement, pushHistory, dispatch, markElementAsUnsaved],
   );
 
   const getCursorStyle = () => {
@@ -1253,6 +1502,69 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
 
   return (
     <div ref={containerRef} className="relative w-full h-full overflow-hidden">
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-50">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Chargement du tableau...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Save Button */}
+      <div className="absolute justify-end top-20 right-4 z-40 flex items-center gap-2">
+        {hasUnsavedChanges && !isSaving && (
+          <span className="text-sm text-yellow-600 dark:text-yellow-500 font-medium flex items-center gap-1">
+            <span className="w-2 h-2 bg-yellow-600 dark:bg-yellow-500 rounded-full animate-pulse"></span>
+            Modifications non sauvegardées
+          </span>
+        )}
+        <button
+          onClick={saveAllChanges}
+          disabled={!hasUnsavedChanges || isSaving}
+          className={`
+            px-4 py-2 rounded-lg font-medium shadow-lg transition-all
+            flex items-center gap-2
+            ${
+              hasUnsavedChanges && !isSaving
+                ? "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+                : "bg-muted text-muted-foreground cursor-not-allowed opacity-60"
+            }
+          `}
+        >
+          {isSaving ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+              Sauvegarde...
+            </>
+          ) : (
+            <>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+              </svg>
+              Sauvegarder
+              {hasUnsavedChanges && (
+                <span className="text-xs bg-white/20 px-1.5 py-0.5 rounded">
+                  {unsavedElementIds.size + deletedElementIds.size}
+                </span>
+              )}
+            </>
+          )}
+        </button>
+      </div>
+
       <canvas
         ref={canvasRef}
         className="w-full h-full"
@@ -1261,7 +1573,6 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
         onDoubleClick={handleDoubleClick}
       />
 
@@ -1274,8 +1585,8 @@ export function Canvas({ broadcastCursor, roomId }: CanvasProps) {
             state.elements.find((el) => el.id === textInputPos.id)?.text ?? ""
           }
           isSticky={
-            state.elements.find((el) => el.id === textInputPos.id)?.type ===
-            "sticky"
+            state.elements.find((el) => el.id === textInputPos.id)
+              ?.element_type === "sticky"
           }
           onSubmit={handleTextSubmit}
           onCancel={() => {

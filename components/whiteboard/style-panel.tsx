@@ -43,9 +43,9 @@ export function StylePanel() {
     state.tool === "ellipse" ||
     state.tool === "diamond" ||
     (selectedElement &&
-      (selectedElement.type === "rectangle" ||
-        selectedElement.type === "ellipse" ||
-        selectedElement.type === "diamond"));
+      (selectedElement.element_type === "rectangle" ||
+        selectedElement.element_type === "ellipse" ||
+        selectedElement.element_type === "diamond"));
 
   return (
     <div className="absolute top-20 left-4 z-20">

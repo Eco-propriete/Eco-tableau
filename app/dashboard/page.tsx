@@ -31,12 +31,12 @@ export default function Dashboard() {
         data: { user },
       } = await supabase.auth.getUser();
 
-      if (!user) {
-        router.push("/auth/login");
-        return;
-      }
+      //if (!user) {
+      //router.push("/auth/login");
+      //return;
+      //}
 
-      setUser(user);
+      //setUser(user);
 
       const { data: boardsData, error } = await supabase
         .from("boards")
@@ -54,7 +54,7 @@ export default function Dashboard() {
   }, [router]);
 
   async function createBoard() {
-    if (!newBoardName.trim() || !user) return;
+    //if (!newBoardName.trim() || !user) return;
 
     setCreating(true);
     const supabase = createClient();
@@ -63,7 +63,6 @@ export default function Dashboard() {
       .from("boards")
       .insert({
         name: newBoardName,
-        user_id: user.id,
       })
       .select();
 

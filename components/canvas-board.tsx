@@ -65,10 +65,10 @@ export default function CanvasBoard({ params }: { params: { id: string } }) {
         data: { user },
       } = await supabase.auth.getUser();
 
-      if (!user) {
-        router.push("/auth/login");
-        return;
-      }
+      //if (!user) {
+      //router.push("/auth/login");
+      //return;
+      //}
 
       setUser(user);
 

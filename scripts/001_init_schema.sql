@@ -1,7 +1,7 @@
 -- Create boards table
 CREATE TABLE IF NOT EXISTS public.boards (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  --user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT,
   thumbnail_url TEXT,
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.boards (
 CREATE TABLE IF NOT EXISTS public.canvas_elements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   board_id UUID NOT NULL REFERENCES public.boards(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  --user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   element_type TEXT NOT NULL, -- 'rectangle', 'circle', 'text', 'pencil', etc.
   x FLOAT NOT NULL,
   y FLOAT NOT NULL,
@@ -30,44 +30,75 @@ CREATE TABLE IF NOT EXISTS public.canvas_elements (
 );
 
 -- Enable RLS
-ALTER TABLE public.boards ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.canvas_elements ENABLE ROW LEVEL SECURITY;
-
--- Create RLS policies for boards
-CREATE POLICY "Users can view their own boards" 
-  ON public.boards FOR SELECT 
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can create boards" 
-  ON public.boards FOR INSERT 
-  WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their own boards" 
-  ON public.boards FOR UPDATE 
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own boards" 
-  ON public.boards FOR DELETE 
-  USING (auth.uid() = user_id);
-
--- Create RLS policies for canvas_elements
-CREATE POLICY "Users can view elements in boards they own" 
-  ON public.canvas_elements FOR SELECT 
-  USING (board_id IN (SELECT id FROM public.boards WHERE user_id = auth.uid()));
-
-CREATE POLICY "Users can create elements in their boards" 
-  ON public.canvas_elements FOR INSERT 
-  WITH CHECK (auth.uid() = user_id AND board_id IN (SELECT id FROM public.boards WHERE user_id = auth.uid()));
-
-CREATE POLICY "Users can update elements in their boards" 
-  ON public.canvas_elements FOR UPDATE 
-  USING (auth.uid() = user_id AND board_id IN (SELECT id FROM public.boards WHERE user_id = auth.uid()));
-
-CREATE POLICY "Users can delete elements in their boards" 
-  ON public.canvas_elements FOR DELETE 
-  USING (auth.uid() = user_id AND board_id IN (SELECT id FROM public.boards WHERE user_id = auth.uid()));
+--ALTER TABLE public.boards ENABLE ROW LEVEL SECURITY;
+--ALTER TABLE public.canvas_elements ENABLE ROW LEVEL SECURITY;
 
 -- Create indexes for performance
-CREATE INDEX IF NOT EXISTS boards_user_id_idx ON public.boards(user_id);
-CREATE INDEX IF NOT EXISTS canvas_elements_board_id_idx ON public.canvas_elements(board_id);
-CREATE INDEX IF NOT EXISTS canvas_elements_user_id_idx ON public.canvas_elements(user_id);
+--CREATE INDEX IF NOT EXISTS canvas_elements_board_id_idx ON public.canvas_elements(board_id);
+
+-- 2. Créez un index sur board_id pour de meilleures performances
+CREATE INDEX IF NOT EXISTS idx_canvas_elements_board_id 
+ON canvas_elements(board_id);
+
+-- 3. Créez un index sur z_index pour l'ordre d'affichage
+CREATE INDEX IF NOT EXISTS idx_canvas_elements_z_index 
+ON canvas_elements(board_id, z_index);
+
+-- 4. IMPORTANT: Politique RLS (Row Level Security)
+-- Si RLS est activé, assurez-vous d'avoir les bonnes politiques
+
+-- Permettre la lecture
+CREATE POLICY "Users can view canvas elements" ON canvas_elements
+  FOR SELECT USING (true);
+
+-- Permettre l'insertion
+CREATE POLICY "Users can insert canvas elements" ON canvas_elements
+  FOR INSERT WITH CHECK (true);
+
+-- Permettre la mise à jour
+CREATE POLICY "Users can update canvas elements" ON canvas_elements
+  FOR UPDATE USING (true);
+
+-- Permettre la suppression
+CREATE POLICY "Users can delete canvas elements" ON canvas_elements
+  FOR DELETE USING (true);
+
+-- 5. Vérification de l'intégrité des données
+-- Exécutez cette requête pour vérifier vos données :
+-- Create RLS policies for boards
+--CREATE POLICY "Users can view their own boards" 
+ -- ON public.boards FOR SELECT 
+  --USING (auth.uid() = user_id);
+
+--CREATE POLICY "Users can create boards" 
+  --ON public.boards FOR INSERT 
+  --WITH CHECK (auth.uid() = user_id);
+
+--CREATE POLICY "Users can update their own boards" 
+  --ON public.boards FOR UPDATE 
+  --USING (auth.uid() = user_id);
+
+--CREATE POLICY "Users can delete their own boards" 
+  --ON public.boards FOR DELETE 
+  --USING (auth.uid() = user_id);
+
+-- Create RLS policies for canvas_elements
+--CREATE POLICY "Users can view elements in boards they own" 
+  --ON public.canvas_elements FOR SELECT 
+  --USING (board_id IN (SELECT id FROM public.boards WHERE user_id = auth.uid()));
+
+--CREATE POLICY "Users can create elements in their boards" 
+  --ON public.canvas_elements FOR INSERT 
+  --WITH CHECK (auth.uid() = user_id AND board_id IN (SELECT id FROM public.boards WHERE user_id = auth.uid()));
+
+--CREATE POLICY "Users can update elements in their boards" 
+  --ON public.canvas_elements FOR UPDATE 
+  --USING (auth.uid() = user_id AND board_id IN (SELECT id FROM public.boards WHERE user_id = auth.uid()));
+
+--CREATE POLICY "Users can delete elements in their boards" 
+  --ON public.canvas_elements FOR DELETE 
+  --USING (auth.uid() = user_id AND board_id IN (SELECT id FROM public.boards WHERE user_id = auth.uid()));
+
+-- Create indexes for performance
+--CREATE INDEX IF NOT EXISTS boards_user_id_idx ON public.boards(user_id);
+--CREATE INDEX IF NOT EXISTS canvas_elements_user_id_idx ON public.canvas_elements(user_id);

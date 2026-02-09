@@ -23,7 +23,7 @@ export interface Camera {
 
 export interface WhiteboardElement {
   id: string;
-  type:
+  element_type:
     | "rectangle"
     | "ellipse"
     | "diamond"

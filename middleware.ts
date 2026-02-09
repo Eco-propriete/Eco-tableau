@@ -35,26 +35,26 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   // Protect dashboard and board routes
-  if (
-    (request.nextUrl.pathname.startsWith("/dashboard") ||
-      request.nextUrl.pathname.startsWith("/board")) &&
-    !user
-  ) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/auth/login";
-    return NextResponse.redirect(redirectUrl);
-  }
+  // if (
+  // (request.nextUrl.pathname.startsWith("/dashboard") ||
+  // request.nextUrl.pathname.startsWith("/board")) &&
+  // !user
+  // ) {
+  // const redirectUrl = request.nextUrl.clone();
+  //  redirectUrl.pathname = "/auth/login";
+  // return NextResponse.redirect(redirectUrl);
+  //  }
 
   // Redirect authenticated users away from auth pages
-  if (
-    (request.nextUrl.pathname.startsWith("/auth/") ||
-      request.nextUrl.pathname === "/") &&
-    user
-  ) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/dashboard";
-    return NextResponse.redirect(redirectUrl);
-  }
+  //if (
+  // (request.nextUrl.pathname.startsWith("/auth/") ||
+  //request.nextUrl.pathname === "/") &&
+  // user
+  //) {
+  //const redirectUrl = request.nextUrl.clone();
+  //redirectUrl.pathname = "/dashboard";
+  //return NextResponse.redirect(redirectUrl);
+  //}
 
   return supabaseResponse;
 }
