@@ -8,14 +8,16 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { ShareDialog } from "./share-dialog";
 import { UserAvatars } from "./cursor-overlay";
 import type { RemoteUser } from "@/hooks/use-realtime";
 import { resolveThemeColor, useTheme } from "@/hooks/use-theme";
 import { Moon, Sun } from "lucide-react";
+import { Connection, getConnectionPoints, getElementBounds } from "./canvas";
 
 interface TopBarProps {
+  boardId: string | null;
   roomId: string | null;
   isConnected: boolean;
   remoteUsers: RemoteUser[];
@@ -26,6 +28,7 @@ interface TopBarProps {
 }
 
 export function TopBar({
+  boardId,
   roomId,
   isConnected,
   remoteUsers,
@@ -37,25 +40,30 @@ export function TopBar({
   const { state, undo, redo, dispatch, pushHistory, addElement } =
     useWhiteboard();
   const { theme, toggleTheme } = useTheme();
-
+  const [connections, setConnections] = useState<Connection[]>([]);
   const canUndo = state.historyIndex > 0;
   const canRedo = state.historyIndex < state.history.length - 1;
+
+  // Fonction d'export à ajouter dans votre composant Canvas
+  // Remplacez votre fonction handleExport actuelle par celle-ci
 
   const handleExport = useCallback(() => {
     const exportCanvas = document.createElement("canvas");
     const ctx = exportCanvas.getContext("2d");
     if (!ctx || state.elements.length === 0) return;
 
+    // Calculate bounds
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
     for (const el of state.elements) {
-      minX = Math.min(minX, el.x);
-      minY = Math.min(minY, el.y);
-      maxX = Math.max(maxX, el.x + (el.width || 200));
-      maxY = Math.max(maxY, el.y + (el.height || 40));
+      const bounds = getElementBounds(el);
+      minX = Math.min(minX, bounds.x);
+      minY = Math.min(minY, bounds.y);
+      maxX = Math.max(maxX, bounds.x + bounds.width);
+      maxY = Math.max(maxY, bounds.y + bounds.height);
     }
 
     const padding = 40;
@@ -69,9 +77,73 @@ export function TopBar({
     ctx.fillRect(0, 0, width, height);
     ctx.translate(-minX + padding, -minY + padding);
 
+    // Draw connections FIRST (behind elements)
+    for (const conn of connections) {
+      const sourceEl = state.elements.find((el) => el.id === conn.sourceId);
+      const targetEl = state.elements.find((el) => el.id === conn.targetId);
+
+      if (!sourceEl || !targetEl) continue;
+
+      const sourceBounds = getElementBounds(sourceEl);
+      const targetBounds = getElementBounds(targetEl);
+      const sourcePoints = getConnectionPoints(sourceBounds);
+      const targetPoints = getConnectionPoints(targetBounds);
+
+      const start = sourcePoints[conn.sourceHandle || "right"];
+      const end = targetPoints[conn.targetHandle || "left"];
+
+      // Draw curved connection line
+      ctx.beginPath();
+      ctx.strokeStyle = "#64748b";
+      ctx.lineWidth = 2;
+
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const distance = Math.hypot(dx, dy);
+      const controlOffset = Math.min(distance * 0.5, 100);
+
+      let cp1x = start.x;
+      let cp1y = start.y;
+      let cp2x = end.x;
+      let cp2y = end.y;
+
+      if (conn.sourceHandle === "right") cp1x += controlOffset;
+      if (conn.sourceHandle === "left") cp1x -= controlOffset;
+      if (conn.sourceHandle === "top") cp1y -= controlOffset;
+      if (conn.sourceHandle === "bottom") cp1y += controlOffset;
+
+      if (conn.targetHandle === "right") cp2x += controlOffset;
+      if (conn.targetHandle === "left") cp2x -= controlOffset;
+      if (conn.targetHandle === "top") cp2y -= controlOffset;
+      if (conn.targetHandle === "bottom") cp2y += controlOffset;
+
+      ctx.moveTo(start.x, start.y);
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, end.x, end.y);
+      ctx.stroke();
+
+      // Draw arrow at end
+      const angle = Math.atan2(end.y - cp2y, end.x - cp2x);
+      const headLen = 10;
+      ctx.beginPath();
+      ctx.fillStyle = "#64748b";
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(
+        end.x - headLen * Math.cos(angle - Math.PI / 6),
+        end.y - headLen * Math.sin(angle - Math.PI / 6),
+      );
+      ctx.lineTo(
+        end.x - headLen * Math.cos(angle + Math.PI / 6),
+        end.y - headLen * Math.sin(angle + Math.PI / 6),
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Draw elements
     for (const el of state.elements) {
       ctx.save();
       ctx.globalAlpha = el.opacity;
+
       switch (el.element_type) {
         case "rectangle":
           if (el.fill !== "transparent") {
@@ -82,6 +154,7 @@ export function TopBar({
           ctx.lineWidth = el.strokeWidth;
           ctx.strokeRect(el.x, el.y, el.width, el.height);
           break;
+
         case "ellipse":
           ctx.beginPath();
           ctx.ellipse(
@@ -101,6 +174,7 @@ export function TopBar({
           ctx.lineWidth = el.strokeWidth;
           ctx.stroke();
           break;
+
         case "diamond": {
           const cx = el.x + el.width / 2;
           const cy = el.y + el.height / 2;
@@ -119,6 +193,7 @@ export function TopBar({
           ctx.stroke();
           break;
         }
+
         case "pen":
           if (el.points && el.points.length > 1) {
             ctx.beginPath();
@@ -128,99 +203,124 @@ export function TopBar({
             ctx.lineJoin = "round";
             ctx.moveTo(el.points[0].x, el.points[0].y);
             for (let i = 1; i < el.points.length; i++) {
-              ctx.lineTo(el.points[i].x, el.points[i].y);
+              const p0 = el.points[i - 1];
+              const p1 = el.points[i];
+              const midX = (p0.x + p1.x) / 2;
+              const midY = (p0.y + p1.y) / 2;
+              ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
             }
             ctx.stroke();
           }
           break;
+
         case "arrow": {
+          const startX = el.x;
+          const startY = el.y;
+          const endX = el.endX ?? el.x;
+          const endY = el.endY ?? el.y;
+
           ctx.beginPath();
           ctx.strokeStyle = el.stroke;
           ctx.lineWidth = el.strokeWidth;
           ctx.lineCap = "round";
-          ctx.moveTo(el.x, el.y);
-          ctx.lineTo(el.endX ?? el.x, el.endY ?? el.y);
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(endX, endY);
           ctx.stroke();
-          const angle = Math.atan2(
-            (el.endY ?? el.y) - el.y,
-            (el.endX ?? el.x) - el.x,
-          );
+
+          const angle = Math.atan2(endY - startY, endX - startX);
           const headLen = 14;
           ctx.beginPath();
           ctx.fillStyle = el.stroke;
-          ctx.moveTo(el.endX ?? el.x, el.endY ?? el.y);
+          ctx.moveTo(endX, endY);
           ctx.lineTo(
-            (el.endX ?? el.x) - headLen * Math.cos(angle - Math.PI / 6),
-            (el.endY ?? el.y) - headLen * Math.sin(angle - Math.PI / 6),
+            endX - headLen * Math.cos(angle - Math.PI / 6),
+            endY - headLen * Math.sin(angle - Math.PI / 6),
           );
           ctx.lineTo(
-            (el.endX ?? el.x) - headLen * Math.cos(angle + Math.PI / 6),
-            (el.endY ?? el.y) - headLen * Math.sin(angle + Math.PI / 6),
+            endX - headLen * Math.cos(angle + Math.PI / 6),
+            endY - headLen * Math.sin(angle + Math.PI / 6),
           );
           ctx.closePath();
           ctx.fill();
           break;
         }
+
         case "text":
           ctx.font = `${el.fontSize ?? 16}px Inter, system-ui, sans-serif`;
           ctx.fillStyle = el.stroke;
           ctx.textBaseline = "top";
-          ctx.fillText(el.text ?? "", el.x, el.y);
+          const textLines = (el.text ?? "").split("\n");
+          const lineH = (el.fontSize ?? 16) * 1.4;
+          for (let i = 0; i < textLines.length; i++) {
+            ctx.fillText(textLines[i], el.x, el.y + i * lineH);
+          }
           break;
+
         case "sticky": {
           const radius = 8;
+          const sx = el.x;
+          const sy = el.y;
+          const sw = el.width;
+          const sh = el.height;
+
           ctx.shadowColor = "rgba(0,0,0,0.08)";
           ctx.shadowBlur = 12;
           ctx.shadowOffsetY = 4;
+
           ctx.beginPath();
-          ctx.moveTo(el.x + radius, el.y);
-          ctx.lineTo(el.x + el.width - radius, el.y);
-          ctx.arcTo(
-            el.x + el.width,
-            el.y,
-            el.x + el.width,
-            el.y + radius,
-            radius,
-          );
-          ctx.lineTo(el.x + el.width, el.y + el.height - radius);
-          ctx.arcTo(
-            el.x + el.width,
-            el.y + el.height,
-            el.x + el.width - radius,
-            el.y + el.height,
-            radius,
-          );
-          ctx.lineTo(el.x + radius, el.y + el.height);
-          ctx.arcTo(
-            el.x,
-            el.y + el.height,
-            el.x,
-            el.y + el.height - radius,
-            radius,
-          );
-          ctx.lineTo(el.x, el.y + radius);
-          ctx.arcTo(el.x, el.y, el.x + radius, el.y, radius);
+          ctx.moveTo(sx + radius, sy);
+          ctx.lineTo(sx + sw - radius, sy);
+          ctx.arcTo(sx + sw, sy, sx + sw, sy + radius, radius);
+          ctx.lineTo(sx + sw, sy + sh - radius);
+          ctx.arcTo(sx + sw, sy + sh, sx + sw - radius, sy + sh, radius);
+          ctx.lineTo(sx + radius, sy + sh);
+          ctx.arcTo(sx, sy + sh, sx, sy + sh - radius, radius);
+          ctx.lineTo(sx, sy + radius);
+          ctx.arcTo(sx, sy, sx + radius, sy, radius);
           ctx.closePath();
           ctx.fillStyle = el.fill;
           ctx.fill();
+
           ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetY = 0;
+
           if (el.text) {
             ctx.font = `${el.fontSize ?? 14}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = resolveThemeColor("--canvas-text");
             ctx.textBaseline = "top";
-            ctx.fillText(el.text, el.x + 10, el.y + 14);
+            const maxWidth = sw - 20;
+            const words = el.text.split(" ");
+            let line = "";
+            let ly = sy + 14;
+            const sLineH = (el.fontSize ?? 14) * 1.4;
+            for (const word of words) {
+              const testLine = line + (line ? " " : "") + word;
+              if (ctx.measureText(testLine).width > maxWidth && line) {
+                ctx.fillText(line, sx + 10, ly);
+                line = word;
+                ly += sLineH;
+              } else {
+                line = testLine;
+              }
+            }
+            ctx.fillText(line, sx + 10, ly);
           }
           break;
         }
       }
+
       ctx.restore();
     }
 
     const link = document.createElement("a");
-    link.download = "whiteboard.png";
+    link.download = `tableau-${boardId}.png`;
     link.href = exportCanvas.toDataURL("image/png");
     link.click();
-  }, [state.elements]);
+  }, [state.elements, connections, boardId]);
+
+  // N'oubliez pas d'ajouter cette fonction dans votre composant
+  // et de l'appeler depuis un bouton ou menu
 
   const handleDuplicate = useCallback(() => {
     if (state.selectedIds.length === 0) return;
@@ -392,6 +492,7 @@ export function TopBar({
         </div>
 
         <ShareDialog
+          boardId={boardId}
           roomId={roomId}
           isConnected={isConnected}
           onCreateRoom={onCreateRoom}

@@ -44,15 +44,14 @@ export function WhiteboardApp({ params }: { params: { id: string } }) {
   const handleCreateRoom = useCallback(() => {
     const newRoomId = generateRoomId();
     setRoomId(newRoomId);
-    const url = new URL(window.location.href);
-    url.searchParams.set("room", newRoomId);
-    router.replace(url.pathname + url.search);
   }, [router]);
 
   const handleLeaveRoom = useCallback(() => {
     setRoomId(null);
     const url = new URL(window.location.href);
-    url.searchParams.delete("room");
+    url.searchParams.delete(`${url.origin}/board/${boardId}`);
+
+    console.log("URL DELETE:::", url, url.pathname + url.search);
     router.replace(url.pathname);
   }, [router]);
 
@@ -67,6 +66,7 @@ export function WhiteboardApp({ params }: { params: { id: string } }) {
       />
       <main className="h-screen w-screen overflow-hidden bg-background relative">
         <TopBar
+          boardId={boardId}
           roomId={roomId}
           isConnected={isConnected}
           remoteUsers={remoteUsers}

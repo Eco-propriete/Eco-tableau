@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { Copy, Check, Share2, Link2, Wifi, WifiOff } from "lucide-react";
 
 interface ShareDialogProps {
+  boardId: string | null;
   roomId: string | null;
   isConnected: boolean;
   onCreateRoom: () => void;
@@ -11,6 +12,7 @@ interface ShareDialogProps {
 }
 
 export function ShareDialog({
+  boardId,
   roomId,
   isConnected,
   onCreateRoom,
@@ -19,9 +21,9 @@ export function ShareDialog({
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const shareUrl = roomId
+  const shareUrl = boardId
     ? typeof window !== "undefined"
-      ? `${window.location.origin}?room=${roomId}`
+      ? `${window.location.origin}/board/${boardId}`
       : ""
     : "";
 
@@ -49,15 +51,15 @@ export function ShareDialog({
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all shadow-lg border ${
-          roomId
+          boardId
             ? "bg-primary text-primary-foreground border-primary hover:opacity-90"
             : "bg-card text-foreground border-border hover:bg-muted"
         }`}
         aria-label="Share whiteboard"
       >
         <Share2 className="w-4 h-4" />
-        <span>{roomId ? "Partage" : "Partager"}</span>
-        {roomId && (
+        <span>{boardId ? "Partage" : "Partager"}</span>
+        {boardId && (
           <span className="flex items-center gap-1">
             {isConnected ? (
               <Wifi className="w-3.5 h-3.5" />

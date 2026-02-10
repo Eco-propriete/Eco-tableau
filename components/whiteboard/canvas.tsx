@@ -44,7 +44,7 @@ function measureTextBounds(el: WhiteboardElement) {
   };
 }
 
-function getElementBounds(el: WhiteboardElement) {
+export function getElementBounds(el: WhiteboardElement) {
   if (el.element_type === "pen" && el.points && el.points.length > 0) {
     let minX = Infinity,
       minY = Infinity,
@@ -189,12 +189,66 @@ function getHandleCursor(handle: ResizeHandle): string {
   return cursorMap[handle];
 }
 
+// Get connection points for an element
+export function getConnectionPoints(bounds: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): Record<"top" | "right" | "bottom" | "left", Point> {
+  const { x, y, width, height } = bounds;
+  return {
+    top: { x: x + width / 2, y: y },
+    right: { x: x + width, y: y + height / 2 },
+    bottom: { x: x + width / 2, y: y + height },
+    left: { x: x, y: y + height / 2 },
+  };
+}
+
+// Check if point is near a connection handle
+function hitTestConnectionPoint(
+  px: number,
+  py: number,
+  points: Record<"top" | "right" | "bottom" | "left", Point>,
+  hitRadius: number = 8,
+): "top" | "right" | "bottom" | "left" | null {
+  const handles: ("top" | "right" | "bottom" | "left")[] = [
+    "top",
+    "right",
+    "bottom",
+    "left",
+  ];
+  for (const handle of handles) {
+    const point = points[handle];
+    const dist = Math.hypot(px - point.x, py - point.y);
+    if (dist <= hitRadius) {
+      return handle;
+    }
+  }
+  return null;
+}
+
 interface ResizeState {
   handle: ResizeHandle;
   elementId: string;
   startBounds: { x: number; y: number; width: number; height: number };
   startPoint: Point;
   startFontSize?: number;
+}
+
+export interface Connection {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  sourceHandle?: "top" | "right" | "bottom" | "left";
+  targetHandle?: "top" | "right" | "bottom" | "left";
+}
+
+interface ConnectionPoint {
+  elementId: string;
+  handle: "top" | "right" | "bottom" | "left";
+  x: number;
+  y: number;
 }
 
 interface CanvasProps {
@@ -228,6 +282,15 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
   const [deletedElementIds, setDeletedElementIds] = useState<Set<string>>(
     new Set(),
   );
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionStart, setConnectionStart] =
+    useState<ConnectionPoint | null>(null);
+  const [connectionPreview, setConnectionPreview] = useState<Point | null>(
+    null,
+  );
+  const [hoveredConnectionPoint, setHoveredConnectionPoint] =
+    useState<ConnectionPoint | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [dragStart, setDragStart] = useState<Point | null>(null);
@@ -322,6 +385,43 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
 
           // Clear any existing elements first, then set new ones
           dispatch({ type: "SET_ELEMENTS", elements: whiteboardElements });
+
+          // Load connections
+          const { data: connectionsData, error: connectionsError } =
+            await supabase
+              .from("canvas_connections")
+              .select("*")
+              .eq("board_id", boardId);
+
+          if (
+            !connectionsError &&
+            connectionsData &&
+            connectionsData.length > 0
+          ) {
+            const loadedConnections: Connection[] = connectionsData.map(
+              (conn: any) => ({
+                id: conn.id,
+                sourceId: conn.source_id,
+                targetId: conn.target_id,
+                sourceHandle: conn.source_handle as
+                  | "top"
+                  | "right"
+                  | "bottom"
+                  | "left",
+                targetHandle: conn.target_handle as
+                  | "top"
+                  | "right"
+                  | "bottom"
+                  | "left",
+              }),
+            );
+            setConnections(loadedConnections);
+            console.log(
+              "✅ Loaded connections from Supabase:",
+              loadedConnections.length,
+              "connections",
+            );
+          }
         } else {
           console.log("ℹ️ No elements found for board:", boardId);
           dispatch({ type: "SET_ELEMENTS", elements: [] });
@@ -369,7 +469,6 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
       },
     );
   }
-
   // Save all unsaved changes to Supabase
   const saveAllChanges = useCallback(async () => {
     if (!boardId || boardId === "undefined") {
@@ -443,9 +542,43 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
         } else {
           console.log("✅ All elements saved successfully!");
           setUnsavedElementIds(new Set());
-          setHasUnsavedChanges(false);
         }
       }
+
+      // 3. Save connections
+      if (connections.length > 0) {
+        console.log("🔗 Saving connections:", connections.length);
+
+        // First, delete all existing connections for this board
+        await supabase
+          .from("canvas_connections")
+          .delete()
+          .eq("board_id", boardId);
+
+        // Then insert all current connections
+        const connectionsToSave = connections.map((conn) => ({
+          id: generateUUID(),
+          board_id: boardId,
+          source_id: conn.sourceId,
+          target_id: conn.targetId,
+          source_handle: conn.sourceHandle,
+          target_handle: conn.targetHandle,
+        }));
+
+        console.log("Connexions à sauvegarder:", connectionsToSave);
+
+        const { error: connectionsError } = await supabase
+          .from("canvas_connections")
+          .insert(connectionsToSave);
+
+        if (connectionsError) {
+          console.error("❌ Error saving connections:", connectionsError);
+        } else {
+          console.log("✅ Connections saved successfully!");
+        }
+      }
+
+      setHasUnsavedChanges(false);
 
       // Show success message
       alert("✅ Modifications sauvegardées avec succès !");
@@ -455,9 +588,13 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
     } finally {
       setIsSaving(false);
     }
-  }, [boardId, state.elements, unsavedElementIds, deletedElementIds]);
-
-  // Mark element for deletion (not deleted yet)
+  }, [
+    boardId,
+    state.elements,
+    unsavedElementIds,
+    deletedElementIds,
+    connections,
+  ]);
 
   // Draw everything
   const draw = useCallback(() => {
@@ -503,6 +640,9 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
     }
     ctx.stroke();
 
+    // Draw connections first (behind elements)
+    drawConnections(ctx);
+
     // Draw elements
     for (const el of state.elements) {
       drawElement(ctx, el, state.selectedIds.includes(el.id));
@@ -514,7 +654,17 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
     }
 
     ctx.restore();
-  }, [state, currentElement, theme]);
+  }, [
+    state,
+    currentElement,
+    theme,
+    connections,
+    isConnecting,
+    connectionStart,
+    connectionPreview,
+    hoveredConnectionPoint,
+    isDragging,
+  ]);
 
   function drawElement(
     ctx: CanvasRenderingContext2D,
@@ -581,7 +731,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
           ctx.lineWidth = el.strokeWidth;
           ctx.lineCap = "round";
           ctx.lineJoin = "round";
-          ctx.moveTo(el.points[0].x, el.points[0].y);
+          //ctx.moveTo(el.points[0].x, el.points[0].y);
           for (let i = 1; i < el.points.length; i++) {
             const p0 = el.points[i - 1];
             const p1 = el.points[i];
@@ -690,6 +840,44 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
       }
     }
 
+    // Draw connection points on all elements (always visible like React Flow handles)
+    const bounds = getElementBounds(el);
+    const connPoints = getConnectionPoints(bounds);
+
+    // Draw connection handles
+    for (const [handle, point] of Object.entries(connPoints)) {
+      const isHovered =
+        hoveredConnectionPoint?.elementId === el.id &&
+        hoveredConnectionPoint?.handle === handle;
+      const isConnecting =
+        connectionStart?.elementId === el.id &&
+        connectionStart?.handle === handle;
+
+      ctx.beginPath();
+      ctx.arc(
+        point.x,
+        point.y,
+        isHovered || isConnecting ? 7 : 5,
+        0,
+        Math.PI * 2,
+      );
+
+      if (isConnecting) {
+        ctx.fillStyle = "#3b82f6";
+        ctx.strokeStyle = "#2563eb";
+      } else if (isHovered) {
+        ctx.fillStyle = "#60a5fa";
+        ctx.strokeStyle = "#3b82f6";
+      } else {
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "#94a3b8";
+      }
+
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
     // Selection outline + resize handles
     if (isSelected) {
       const bounds = getElementBounds(el);
@@ -742,6 +930,139 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
     }
 
     ctx.restore();
+  }
+
+  // Draw connections between elements
+  function drawConnections(ctx: CanvasRenderingContext2D) {
+    for (const conn of connections) {
+      const sourceEl = state.elements.find((el) => el.id === conn.sourceId);
+      const targetEl = state.elements.find((el) => el.id === conn.targetId);
+
+      if (!sourceEl || !targetEl) continue;
+
+      const sourceBounds = getElementBounds(sourceEl);
+      const targetBounds = getElementBounds(targetEl);
+      const sourcePoints = getConnectionPoints(sourceBounds);
+      const targetPoints = getConnectionPoints(targetBounds);
+
+      const start = sourcePoints[conn.sourceHandle || "right"];
+      const end = targetPoints[conn.targetHandle || "left"];
+
+      // Draw curved connection line
+      ctx.beginPath();
+      ctx.strokeStyle = "#64748b";
+      ctx.lineWidth = 2;
+
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const distance = Math.hypot(dx, dy);
+      const controlOffset = Math.min(distance * 0.5, 100);
+
+      // Determine control points based on handles
+      let cp1x = start.x;
+      let cp1y = start.y;
+      let cp2x = end.x;
+      let cp2y = end.y;
+
+      if (conn.sourceHandle === "right") cp1x += controlOffset;
+      if (conn.sourceHandle === "left") cp1x -= controlOffset;
+      if (conn.sourceHandle === "top") cp1y -= controlOffset;
+      if (conn.sourceHandle === "bottom") cp1y += controlOffset;
+
+      if (conn.targetHandle === "right") cp2x += controlOffset;
+      if (conn.targetHandle === "left") cp2x -= controlOffset;
+      if (conn.targetHandle === "top") cp2y -= controlOffset;
+      if (conn.targetHandle === "bottom") cp2y += controlOffset;
+
+      ctx.moveTo(start.x, start.y);
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, end.x, end.y);
+      ctx.stroke();
+
+      // Draw arrow at end
+      const angle = Math.atan2(end.y - cp2y, end.x - cp2x);
+      const headLen = 10;
+      ctx.beginPath();
+      ctx.fillStyle = "#64748b";
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(
+        end.x - headLen * Math.cos(angle - Math.PI / 6),
+        end.y - headLen * Math.sin(angle - Math.PI / 6),
+      );
+      ctx.lineTo(
+        end.x - headLen * Math.cos(angle + Math.PI / 6),
+        end.y - headLen * Math.sin(angle + Math.PI / 6),
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Draw connection preview
+    if (isConnecting && connectionStart) {
+      const sourceEl = state.elements.find(
+        (el) => el.id === connectionStart.elementId,
+      );
+      if (sourceEl) {
+        const sourceBounds = getElementBounds(sourceEl);
+        const sourcePoints = getConnectionPoints(sourceBounds);
+        const start = sourcePoints[connectionStart.handle];
+
+        // If hovering over a target point, snap to it
+        const end = hoveredConnectionPoint
+          ? { x: hoveredConnectionPoint.x, y: hoveredConnectionPoint.y }
+          : connectionPreview || start;
+
+        // Draw preview line with same styling as real connections
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const distance = Math.hypot(dx, dy);
+        const controlOffset = Math.min(distance * 0.5, 100);
+
+        let cp1x = start.x;
+        let cp1y = start.y;
+        let cp2x = end.x;
+        let cp2y = end.y;
+
+        if (connectionStart.handle === "right") cp1x += controlOffset;
+        if (connectionStart.handle === "left") cp1x -= controlOffset;
+        if (connectionStart.handle === "top") cp1y -= controlOffset;
+        if (connectionStart.handle === "bottom") cp1y += controlOffset;
+
+        if (hoveredConnectionPoint) {
+          if (hoveredConnectionPoint.handle === "right") cp2x += controlOffset;
+          if (hoveredConnectionPoint.handle === "left") cp2x -= controlOffset;
+          if (hoveredConnectionPoint.handle === "top") cp2y -= controlOffset;
+          if (hoveredConnectionPoint.handle === "bottom") cp2y += controlOffset;
+        }
+
+        ctx.beginPath();
+        ctx.strokeStyle = hoveredConnectionPoint ? "#22c55e" : "#3b82f6";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.moveTo(start.x, start.y);
+        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, end.x, end.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw arrow head if we have a valid target
+        if (hoveredConnectionPoint || connectionPreview) {
+          const angle = Math.atan2(end.y - cp2y, end.x - cp2x);
+          const headLen = 10;
+          ctx.beginPath();
+          ctx.fillStyle = hoveredConnectionPoint ? "#22c55e" : "#3b82f6";
+          ctx.moveTo(end.x, end.y);
+          ctx.lineTo(
+            end.x - headLen * Math.cos(angle - Math.PI / 6),
+            end.y - headLen * Math.sin(angle - Math.PI / 6),
+          );
+          ctx.lineTo(
+            end.x - headLen * Math.cos(angle + Math.PI / 6),
+            end.y - headLen * Math.sin(angle + Math.PI / 6),
+          );
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
   }
 
   // Animation loop
@@ -824,6 +1145,31 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
       }
 
       if (state.tool === "select") {
+        // Check if clicking on a connection point to start connecting (no need for Shift)
+        for (const el of state.elements) {
+          const bounds = getElementBounds(el);
+          const connPoints = getConnectionPoints(bounds);
+          const handle = hitTestConnectionPoint(
+            canvasPoint.x,
+            canvasPoint.y,
+            connPoints,
+            10,
+          );
+          if (handle) {
+            e.preventDefault();
+            setIsConnecting(true);
+            setConnectionStart({
+              elementId: el.id,
+              handle,
+              x: connPoints[handle].x,
+              y: connPoints[handle].y,
+            });
+            setConnectionPreview(canvasPoint);
+            console.log("🔗 Starting connection from", el.id, handle);
+            return;
+          }
+        }
+
         // First, check if clicking on a resize handle of the currently selected element
         if (state.selectedIds.length === 1) {
           const selectedEl = state.elements.find(
@@ -901,7 +1247,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
       }
 
       if (state.tool === "text") {
-        const id = generateId();
+        const id = generateUUID();
         const newEl: WhiteboardElement = {
           id,
           element_type: "text",
@@ -924,7 +1270,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
       }
 
       if (state.tool === "sticky") {
-        const id = generateId();
+        const id = generateUUID();
         const colorIdx = stickyColorIndex % STICKY_COLORS.length;
         const newEl: WhiteboardElement = {
           id,
@@ -954,7 +1300,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
 
       if (state.tool === "pen") {
         const newEl: WhiteboardElement = {
-          id: generateId(),
+          id: generateUUID(),
           element_type: "pen",
           x: canvasPoint.x,
           y: canvasPoint.y,
@@ -969,7 +1315,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
         setCurrentElement(newEl);
       } else if (state.tool === "arrow") {
         const newEl: WhiteboardElement = {
-          id: generateId(),
+          id: generateUUID(),
           element_type: "arrow",
           x: canvasPoint.x,
           y: canvasPoint.y,
@@ -989,7 +1335,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
         state.tool === "diamond"
       ) {
         const newEl: WhiteboardElement = {
-          id: generateId(),
+          id: generateUUID(),
           element_type: state.tool as "rectangle" | "ellipse" | "diamond",
           x: canvasPoint.x,
           y: canvasPoint.y,
@@ -1028,12 +1374,75 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
         broadcastCursor(canvasPoint.x, canvasPoint.y);
       }
 
+      // Update connection preview
+      if (isConnecting) {
+        setConnectionPreview(canvasPoint);
+
+        // Check if hovering over a connection point (larger hit area for better UX)
+        let foundHover: ConnectionPoint | null = null;
+        for (const el of state.elements) {
+          if (el.id === connectionStart?.elementId) continue; // Skip source element
+          const bounds = getElementBounds(el);
+          const connPoints = getConnectionPoints(bounds);
+          const handle = hitTestConnectionPoint(
+            canvasPoint.x,
+            canvasPoint.y,
+            connPoints,
+            15,
+          );
+          if (handle) {
+            foundHover = {
+              elementId: el.id,
+              handle,
+              x: connPoints[handle].x,
+              y: connPoints[handle].y,
+            };
+            break;
+          }
+        }
+        setHoveredConnectionPoint(foundHover);
+        return;
+      }
+
+      // Handle hover cursor for connection points when in select mode
+      if (
+        !isDragging &&
+        !isPanning &&
+        state.tool === "select" &&
+        !isConnecting
+      ) {
+        let foundHover: ConnectionPoint | null = null;
+        for (const el of state.elements) {
+          const bounds = getElementBounds(el);
+          const connPoints = getConnectionPoints(bounds);
+          const handle = hitTestConnectionPoint(
+            canvasPoint.x,
+            canvasPoint.y,
+            connPoints,
+            10,
+          );
+          if (handle) {
+            foundHover = {
+              elementId: el.id,
+              handle,
+              x: connPoints[handle].x,
+              y: connPoints[handle].y,
+            };
+            break;
+          }
+        }
+        setHoveredConnectionPoint(foundHover);
+      } else if (!isConnecting) {
+        setHoveredConnectionPoint(null);
+      }
+
       // Handle hover cursor for resize handles when not dragging
       if (
         !isDragging &&
         !isPanning &&
         state.tool === "select" &&
-        state.selectedIds.length === 1
+        state.selectedIds.length === 1 &&
+        !isConnecting
       ) {
         const selectedEl = state.elements.find(
           (el) => el.id === state.selectedIds[0],
@@ -1046,7 +1455,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
         } else {
           setHoveredHandle(null);
         }
-      } else if (!isDragging && !isPanning) {
+      } else if (!isDragging && !isPanning && !isConnecting) {
         setHoveredHandle(null);
       }
 
@@ -1273,10 +1682,35 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
       resizeState,
       broadcastCursor,
       roomId,
+      isConnecting,
+      connectionStart,
     ],
   );
 
   const handleMouseUp = useCallback(() => {
+    // Finish creating connection
+    if (isConnecting && connectionStart && hoveredConnectionPoint) {
+      const newConnection: Connection = {
+        id: generateUUID(),
+        sourceId: connectionStart.elementId,
+        targetId: hoveredConnectionPoint.elementId,
+        sourceHandle: connectionStart.handle,
+        targetHandle: hoveredConnectionPoint.handle,
+      };
+      setConnections((prev) => [...prev, newConnection]);
+      setHasUnsavedChanges(true);
+      console.log("✅ Connection created:", newConnection);
+    }
+
+    // Clean up connection state
+    if (isConnecting) {
+      setIsConnecting(false);
+      setConnectionStart(null);
+      setConnectionPreview(null);
+      setHoveredConnectionPoint(null);
+      return;
+    }
+
     if (isPanning) {
       setIsPanning(false);
       setDragStart(null);
@@ -1323,6 +1757,9 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
     addElement,
     resizeState,
     markElementAsUnsaved,
+    isConnecting,
+    connectionStart,
+    hoveredConnectionPoint,
   ]);
 
   // Keyboard shortcuts
@@ -1350,7 +1787,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
           for (const id of state.selectedIds) {
             const el = state.elements.find((e) => e.id === id);
             if (!el) continue;
-            const newId = generateId();
+            const newId = generateUUID();
             const offset = 20;
             const clone: WhiteboardElement = {
               ...JSON.parse(JSON.stringify(el)),
@@ -1475,6 +1912,13 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
   );
 
   const getCursorStyle = () => {
+    // Connection point cursor
+    if (hoveredConnectionPoint && !isConnecting) {
+      return "crosshair";
+    }
+    if (isConnecting) {
+      return hoveredConnectionPoint ? "copy" : "crosshair";
+    }
     if (hoveredHandle) {
       return getHandleCursor(hoveredHandle);
     }
@@ -1564,6 +2008,44 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
           )}
         </button>
       </div>
+
+      {/* Connection Helper */}
+      {state.tool === "select" &&
+        !isConnecting &&
+        state.elements.length > 1 && (
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-40 bg-background/95 backdrop-blur-sm px-4 py-2 rounded-lg shadow-lg border border-border">
+            <p className="text-sm text-muted-foreground flex items-center gap-2">
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+              <span>
+                Drag from connection points (circles) to link elements
+              </span>
+            </p>
+          </div>
+        )}
+
+      {/* Connecting State */}
+      {isConnecting && (
+        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-40 bg-blue-500/95 backdrop-blur-sm px-4 py-2 rounded-lg shadow-lg">
+          <p className="text-sm text-white flex items-center gap-2">
+            <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+            {hoveredConnectionPoint
+              ? "Release to connect"
+              : "Drag to a connection point on another element"}
+          </p>
+        </div>
+      )}
 
       <canvas
         ref={canvasRef}
