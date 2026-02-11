@@ -125,7 +125,7 @@ export default function Dashboard() {
         <div className="space-y-6">
           <div className="flex gap-2">
             <Input
-              placeholder="New board name..."
+              placeholder="Nouveau tableau de bord"
               value={newBoardName}
               onChange={(e) => setNewBoardName(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && createBoard()}
