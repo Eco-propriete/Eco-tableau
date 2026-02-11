@@ -41,7 +41,7 @@ export interface RemoteUser {
   color: string;
 }
 
-export function useRealtime(roomId: string | null) {
+export function useRealtime(roomId: string | null, boardId: string | null) {
   const [remoteCursors, setRemoteCursors] = useState<Map<string, RemoteCursor>>(
     new Map(),
   );
@@ -78,7 +78,7 @@ export function useRealtime(roomId: string | null) {
   }, []);
 
   useEffect(() => {
-    if (!roomId) {
+    if (!roomId && !boardId) {
       setIsConnected(false);
       setRemoteCursors(new Map());
       setRemoteUsers([]);
@@ -86,7 +86,7 @@ export function useRealtime(roomId: string | null) {
     }
 
     const supabase = createClient();
-    const channel = supabase.channel(`room:${roomId}`, {
+    const channel = supabase.channel(`board:${boardId}`, {
       config: {
         presence: {
           key: userIdRef.current,
@@ -180,7 +180,7 @@ export function useRealtime(roomId: string | null) {
       channelRef.current = null;
       setIsConnected(false);
     };
-  }, [roomId]);
+  }, [boardId, roomId]);
 
   const onRemoteElementsRef = useRef<
     ((elements: WhiteboardElement[]) => void) | null
@@ -195,7 +195,7 @@ export function useRealtime(roomId: string | null) {
 
   const broadcastCursor = useCallback(
     (x: number, y: number) => {
-      if (!channelRef.current || !roomId) return;
+      if (!channelRef.current || !roomId || !boardId) return;
       // Throttle to ~30fps
       const now = Date.now();
       if (now - lastBroadcastRef.current < 33) return;
@@ -213,12 +213,12 @@ export function useRealtime(roomId: string | null) {
         },
       });
     },
-    [roomId],
+    [roomId, boardId],
   );
 
   const broadcastElements = useCallback(
     (elements: WhiteboardElement[]) => {
-      if (!channelRef.current || !roomId) return;
+      if (!channelRef.current || !roomId || !boardId) return;
       channelRef.current.send({
         type: "broadcast",
         event: "elements",
@@ -228,7 +228,7 @@ export function useRealtime(roomId: string | null) {
         },
       });
     },
-    [roomId],
+    [roomId, boardId],
   );
 
   return {

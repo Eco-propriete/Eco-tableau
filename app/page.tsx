@@ -14,7 +14,7 @@ import { Suspense } from "react";
 import { TopBar } from "@/components/whiteboard/top-bar";
 import { Toolbar } from "@/components/whiteboard/toolbar";
 import { StylePanel } from "@/components/whiteboard/style-panel";
-import { Canvas } from "@/components/whiteboard/canvas";
+import { Canvas, Connection } from "@/components/whiteboard/canvas";
 import { Minimap } from "@/components/whiteboard/minimap";
 import { ZoomControls } from "@/components/whiteboard/zoom-controls";
 import { CursorOverlay } from "@/components/whiteboard/cursor-overlay";
@@ -26,6 +26,7 @@ function generateRoomId() {
 export function WhiteboardApp({ params }: { params: { id: string } }) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [connections, setConnections] = useState<Connection[]>([]);
   const [roomId, setRoomId] = useState<string | null>(searchParams.get("room"));
   const [boardId] = useState(params.id);
   const {
@@ -37,7 +38,7 @@ export function WhiteboardApp({ params }: { params: { id: string } }) {
     onRemoteElements,
     userName,
     userColor,
-  } = useRealtime(roomId);
+  } = useRealtime(roomId, boardId);
 
   console.log("Board ID:", boardId);
 
@@ -74,6 +75,7 @@ export function WhiteboardApp({ params }: { params: { id: string } }) {
           userColor={userColor}
           onCreateRoom={handleCreateRoom}
           onLeaveRoom={handleLeaveRoom}
+          connections={connections}
         />
         <Toolbar />
         <StylePanel />
@@ -82,6 +84,8 @@ export function WhiteboardApp({ params }: { params: { id: string } }) {
             broadcastCursor={broadcastCursor}
             roomId={roomId}
             params={params}
+            connections={connections}
+            setConnections={setConnections}
           />
           <CursorOverlayWrapper remoteCursors={remoteCursors} />
         </div>

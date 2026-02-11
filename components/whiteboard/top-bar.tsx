@@ -8,13 +8,75 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { ShareDialog } from "./share-dialog";
 import { UserAvatars } from "./cursor-overlay";
 import type { RemoteUser } from "@/hooks/use-realtime";
 import { resolveThemeColor, useTheme } from "@/hooks/use-theme";
 import { Moon, Sun } from "lucide-react";
-import { Connection, getConnectionPoints, getElementBounds } from "./canvas";
+
+// Importez les types et fonctions depuis canvas.tsx
+interface Connection {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  sourceHandle?: "top" | "right" | "bottom" | "left";
+  targetHandle?: "top" | "right" | "bottom" | "left";
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+// Fonctions utilitaires copiées depuis canvas.tsx
+function getElementBounds(el: any) {
+  if (el.type === "pen" && el.points && el.points.length > 0) {
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const p of el.points) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+  if (el.type === "arrow") {
+    const minX = Math.min(el.x, el.endX ?? el.x);
+    const minY = Math.min(el.y, el.endY ?? el.y);
+    const maxX = Math.max(el.x, el.endX ?? el.x);
+    const maxY = Math.max(el.y, el.endY ?? el.y);
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+  if (el.type === "text") {
+    // Approximation pour le texte
+    return {
+      x: el.x,
+      y: el.y,
+      width: el.width || 200,
+      height: el.height || 40,
+    };
+  }
+  return { x: el.x, y: el.y, width: el.width, height: el.height };
+}
+
+function getConnectionPoints(bounds: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): Record<"top" | "right" | "bottom" | "left", Point> {
+  const { x, y, width, height } = bounds;
+  return {
+    top: { x: x + width / 2, y: y },
+    right: { x: x + width, y: y + height / 2 },
+    bottom: { x: x + width / 2, y: y + height },
+    left: { x: x, y: y + height / 2 },
+  };
+}
 
 interface TopBarProps {
   boardId: string | null;
@@ -25,6 +87,7 @@ interface TopBarProps {
   userColor: string;
   onCreateRoom: () => void;
   onLeaveRoom: () => void;
+  connections: Connection[];
 }
 
 export function TopBar({
@@ -36,16 +99,13 @@ export function TopBar({
   userColor,
   onCreateRoom,
   onLeaveRoom,
+  connections,
 }: TopBarProps) {
   const { state, undo, redo, dispatch, pushHistory, addElement } =
     useWhiteboard();
   const { theme, toggleTheme } = useTheme();
-  const [connections, setConnections] = useState<Connection[]>([]);
   const canUndo = state.historyIndex > 0;
   const canRedo = state.historyIndex < state.history.length - 1;
-
-  // Fonction d'export à ajouter dans votre composant Canvas
-  // Remplacez votre fonction handleExport actuelle par celle-ci
 
   const handleExport = useCallback(() => {
     const exportCanvas = document.createElement("canvas");
@@ -62,8 +122,12 @@ export function TopBar({
       const bounds = getElementBounds(el);
       minX = Math.min(minX, bounds.x);
       minY = Math.min(minY, bounds.y);
-      maxX = Math.max(maxX, bounds.x + bounds.width);
-      maxY = Math.max(maxY, bounds.y + bounds.height);
+      maxX = Math.max(maxX, bounds.x + bounds.width, el.x + (el.width || 500));
+      maxY = Math.max(
+        maxY,
+        bounds.y + bounds.height,
+        el.y + (el.height || 500),
+      );
     }
 
     const padding = 40;
@@ -77,12 +141,17 @@ export function TopBar({
     ctx.fillRect(0, 0, width, height);
     ctx.translate(-minX + padding, -minY + padding);
 
+    console.log("🎨 Exporting with", connections.length, "connections");
+
     // Draw connections FIRST (behind elements)
     for (const conn of connections) {
       const sourceEl = state.elements.find((el) => el.id === conn.sourceId);
       const targetEl = state.elements.find((el) => el.id === conn.targetId);
 
-      if (!sourceEl || !targetEl) continue;
+      if (!sourceEl || !targetEl) {
+        console.warn("Connection skipped - missing element:", conn);
+        continue;
+      }
 
       const sourceBounds = getElementBounds(sourceEl);
       const targetBounds = getElementBounds(targetEl);
@@ -137,6 +206,8 @@ export function TopBar({
       );
       ctx.closePath();
       ctx.fill();
+
+      console.log("✅ Drew connection:", conn.sourceId, "→", conn.targetId);
     }
 
     // Draw elements
@@ -317,10 +388,8 @@ export function TopBar({
     link.download = `tableau-${boardId}.png`;
     link.href = exportCanvas.toDataURL("image/png");
     link.click();
+    console.log("✅ Export complete!");
   }, [state.elements, connections, boardId]);
-
-  // N'oubliez pas d'ajouter cette fonction dans votre composant
-  // et de l'appeler depuis un bouton ou menu
 
   const handleDuplicate = useCallback(() => {
     if (state.selectedIds.length === 0) return;
@@ -439,22 +508,6 @@ export function TopBar({
               Exporter en PNG
             </TooltipContent>
           </Tooltip>
-
-          {/*<Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleClearAll}
-                className="flex items-center justify-center w-8 h-8 rounded-lg text-muted-foreground hover:bg-muted hover:text-destructive transition-all"
-                aria-label="Clear all"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </TooltipTrigger>
-
-           <TooltipContent side="bottom" className="text-xs">
-              Supprimer tout
-            </TooltipContent>
-          </Tooltip>*/}
         </div>
       </div>
 

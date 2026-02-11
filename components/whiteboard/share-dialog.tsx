@@ -21,11 +21,12 @@ export function ShareDialog({
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const shareUrl = boardId
-    ? typeof window !== "undefined"
-      ? `${window.location.origin}/board/${boardId}`
-      : ""
-    : "";
+  const shareUrl =
+    boardId && roomId
+      ? typeof window !== "undefined"
+        ? `${window.location.origin}/board/${boardId}`
+        : ""
+      : "";
 
   const handleCopy = useCallback(async () => {
     if (!shareUrl) return;

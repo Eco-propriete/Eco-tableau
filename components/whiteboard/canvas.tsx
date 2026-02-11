@@ -255,9 +255,17 @@ interface CanvasProps {
   broadcastCursor?: (x: number, y: number) => void;
   roomId?: string | null;
   params: { id: string };
+  connections: Connection[];
+  setConnections: React.Dispatch<React.SetStateAction<Connection[]>>;
 }
 
-export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
+export function Canvas({
+  broadcastCursor,
+  roomId,
+  params,
+  connections,
+  setConnections,
+}: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
@@ -282,7 +290,7 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
   const [deletedElementIds, setDeletedElementIds] = useState<Set<string>>(
     new Set(),
   );
-  const [connections, setConnections] = useState<Connection[]>([]);
+
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionStart, setConnectionStart] =
     useState<ConnectionPoint | null>(null);
@@ -498,16 +506,16 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
         }
       }
 
-      // 2. Save/update modified elements
-      if (unsavedElementIds.size > 0) {
-        const elementsToSave = state.elements.filter((el) =>
-          unsavedElementIds.has(el.id),
+      // 2. Save/update ALL elements (pas seulement ceux qui ont changé)
+      // Ceci est important pour que les foreign keys des connexions fonctionnent
+      if (state.elements.length > 0) {
+        console.log(
+          "💾 Saving all elements to ensure foreign keys:",
+          state.elements.length,
         );
 
-        console.log("💾 Saving elements:", elementsToSave.length);
-
-        const canvasElements = elementsToSave.map((element, index) => ({
-          id: generateUUID(),
+        const canvasElements = state.elements.map((element) => ({
+          id: element.id,
           board_id: boardId,
           element_type: element.element_type,
           x: element.x,
@@ -545,19 +553,44 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
         }
       }
 
-      // 3. Save connections
-      if (connections.length > 0) {
-        console.log("🔗 Saving connections:", connections.length);
+      // 3. Save connections AFTER elements are saved
+      console.log("🔗 Preparing to save connections:", connections.length);
+
+      // Vérifier que tous les éléments référencés existent
+      const validConnections = connections.filter((conn) => {
+        const sourceExists = state.elements.some(
+          (el) => el.id === conn.sourceId,
+        );
+        const targetExists = state.elements.some(
+          (el) => el.id === conn.targetId,
+        );
+
+        if (!sourceExists || !targetExists) {
+          console.warn("⚠️ Skipping invalid connection:", conn, {
+            sourceExists,
+            targetExists,
+          });
+          return false;
+        }
+        return true;
+      });
+
+      if (validConnections.length > 0) {
+        console.log("🔗 Saving", validConnections.length, "valid connections");
 
         // First, delete all existing connections for this board
-        await supabase
+        const { error: deleteConnError } = await supabase
           .from("canvas_connections")
           .delete()
           .eq("board_id", boardId);
 
+        if (deleteConnError) {
+          console.error("⚠️ Error deleting old connections:", deleteConnError);
+        }
+
         // Then insert all current connections
-        const connectionsToSave = connections.map((conn) => ({
-          id: generateUUID(),
+        const connectionsToSave = validConnections.map((conn) => ({
+          id: conn.id,
           board_id: boardId,
           source_id: conn.sourceId,
           target_id: conn.targetId,
@@ -565,17 +598,20 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
           target_handle: conn.targetHandle,
         }));
 
-        console.log("Connexions à sauvegarder:", connectionsToSave);
-
         const { error: connectionsError } = await supabase
           .from("canvas_connections")
           .insert(connectionsToSave);
 
         if (connectionsError) {
           console.error("❌ Error saving connections:", connectionsError);
+          // Ne pas throw ici, les éléments sont déjà sauvegardés
         } else {
           console.log("✅ Connections saved successfully!");
         }
+      } else if (connections.length > 0) {
+        console.warn(
+          "⚠️ No valid connections to save. All connections reference non-existent elements.",
+        );
       }
 
       setHasUnsavedChanges(false);
@@ -2029,7 +2065,8 @@ export function Canvas({ broadcastCursor, roomId, params }: CanvasProps) {
                 />
               </svg>
               <span>
-                Drag from connection points (circles) to link elements
+                Faites glisser les éléments à partir des points de connexion
+                (cercles) pour les lier.
               </span>
             </p>
           </div>
