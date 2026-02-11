@@ -106,9 +106,7 @@ export default function Dashboard() {
             <h1 className="text-3xl font-bold text-foreground">
               Tableau de bord
             </h1>
-            <p className="text-sm text-muted-foreground">
-              Bienvenue, {user?.email}
-            </p>
+            <p className="text-sm text-muted-foreground"></p>
           </div>
           <Button
             variant="outline"
