@@ -108,14 +108,6 @@ export default function Dashboard() {
             </h1>
             <p className="text-sm text-muted-foreground"></p>
           </div>
-          <Button
-            variant="outline"
-            onClick={handleLogout}
-            className="gap-2 bg-transparent"
-          >
-            <LogOut className="w-4 h-4" />
-            Déconnexion
-          </Button>
         </div>
       </header>
 

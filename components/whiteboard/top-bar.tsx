@@ -14,6 +14,7 @@ import { UserAvatars } from "./cursor-overlay";
 import type { RemoteUser } from "@/hooks/use-realtime";
 import { resolveThemeColor, useTheme } from "@/hooks/use-theme";
 import { Moon, Sun } from "lucide-react";
+import { generateUUID } from "./canvas";
 
 // Importez les types et fonctions depuis canvas.tsx
 interface Connection {
@@ -398,7 +399,7 @@ export function TopBar({
     for (const id of state.selectedIds) {
       const el = state.elements.find((e) => e.id === id);
       if (!el) continue;
-      const newId = Math.random().toString(36).substring(2, 15);
+      const newId = generateUUID();
       const offset = 20;
       const clone = {
         ...JSON.parse(JSON.stringify(el)),

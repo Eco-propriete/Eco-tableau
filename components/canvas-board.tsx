@@ -290,15 +290,6 @@ export default function CanvasBoard({ params }: { params: { id: string } }) {
           <h2 className="text-lg font-semibold text-foreground">
             Tableau de bord
           </h2>
-          <Button
-            variant="outline"
-            onClick={handleLogout}
-            size="sm"
-            className="gap-2 bg-transparent"
-          >
-            <LogOut className="w-4 h-4" />
-            Se déconnecter
-          </Button>
         </div>
       </header>
 
