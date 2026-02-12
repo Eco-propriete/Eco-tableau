@@ -131,9 +131,9 @@ export function TopBar({
       );
     }
 
-    const padding = 40;
-    const width = maxX - minX + padding * 2;
-    const height = maxY - minY + padding * 2;
+    const padding = 120;
+    const width = maxX - minX + padding * 8;
+    const height = maxY - minY + padding * 8;
 
     exportCanvas.width = width * 2;
     exportCanvas.height = height * 2;
